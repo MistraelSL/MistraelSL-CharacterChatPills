@@ -79,8 +79,15 @@ const I18N = {
 
 function getLanguage() {
     const context = globalThis.SillyTavern?.getContext?.();
-    const candidates = [document.documentElement.lang, context?.language, context?.locale, navigator.language];
-    return candidates.some(value => String(value || '').toLowerCase().startsWith('ru')) ? 'ru' : 'en';
+    const tavernLanguages = [context?.language, context?.locale, document.documentElement.lang];
+
+    for (const value of tavernLanguages) {
+        const language = String(value || '').trim().toLowerCase();
+        if (language.startsWith('ru')) return 'ru';
+        if (language.startsWith('en')) return 'en';
+    }
+
+    return String(navigator.language || '').toLowerCase().startsWith('ru') ? 'ru' : 'en';
 }
 
 function t(key, values = {}) {
@@ -1127,6 +1134,26 @@ function installTopCloseButton() {
 function initialize() {
     scanWelcomePanels();
     installTopCloseButton();
+
+    let activeLanguage = getLanguage();
+    const languageObserver = new MutationObserver(() => {
+        const language = getLanguage();
+        if (language === activeLanguage) return;
+
+        activeLanguage = language;
+        dateFormatters.clear();
+        closeChatModal();
+        document.querySelectorAll('.welcomePanel').forEach(panel => {
+            const welcomeRecent = panel.querySelector('.welcomeRecent');
+            welcomeRecent?.classList.remove(PANEL_CLASS);
+            void replaceRecentChats(panel);
+        });
+        syncTopCloseButton();
+    });
+    languageObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['lang'],
+    });
 
     const observer = new MutationObserver(mutations => {
         for (const mutation of mutations) {
