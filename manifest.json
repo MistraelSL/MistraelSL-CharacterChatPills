@@ -1,0 +1,12 @@
+{
+    "name": "MistraelSL-CharacterChatPills",
+    "display_name": "MistraelSL Character Chat Pills",
+    "description": "Replaces the welcome screen's recent-chat clutter with characters grouped by chat history.",
+    "version": "0.7.2",
+    "author": "Zaebalo Menyauje",
+    "js": "index.js",
+    "css": "style.css",
+    "module": true,
+    "requires": [],
+    "optional": []
+}
