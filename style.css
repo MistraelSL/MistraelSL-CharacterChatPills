@@ -778,8 +778,28 @@
     }
 
     .character-chat-modal-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
         gap: 7px;
+        height: 96px;
+        min-height: 96px;
+        max-height: 96px;
         padding: 9px;
+        overflow: hidden;
+    }
+
+    .character-chat-modal-row-body {
+        min-width: 0;
+        max-height: 76px;
+        overflow: hidden;
+    }
+
+    .character-chat-modal-row-actions {
+        display: grid;
+        grid-template-columns: repeat(3, 38px);
+        flex: none;
+        gap: 4px;
     }
 
     .character-chat-row-action {
@@ -789,18 +809,24 @@
     }
 
     .character-chat-modal-row-preview {
-        display: -webkit-box;
+        display: block;
+        width: 100%;
         overflow: hidden;
-        white-space: normal;
-        -webkit-box-orient: vertical;
-        -webkit-line-clamp: 2;
-        line-clamp: 2;
+        white-space: nowrap;
+        text-overflow: ellipsis;
     }
 
     .character-chat-modal-row-title {
         align-items: center;
         flex-direction: row;
         gap: 3px;
+        width: 100%;
+        overflow: hidden;
+    }
+
+    .character-chat-modal-row-name {
+        min-width: 0;
+        flex: 1;
     }
 
     .character-chat-latest-badge {
