@@ -596,6 +596,12 @@
     font-size: 0.82em;
 }
 
+.character-chat-modal-row-preview {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
 .character-chat-modal-row-stats {
     opacity: 0.42;
     font-size: 0.72em;
@@ -782,13 +788,18 @@
         opacity: 0.8;
     }
 
-    .character-chat-modal-row-body > span:not(.character-chat-modal-row-stats) {
-        display: none;
+    .character-chat-modal-row-preview {
+        display: -webkit-box;
+        overflow: hidden;
+        white-space: normal;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        line-clamp: 2;
     }
 
     .character-chat-modal-row-title {
-        align-items: flex-start;
-        flex-direction: column;
+        align-items: center;
+        flex-direction: row;
         gap: 3px;
     }
 

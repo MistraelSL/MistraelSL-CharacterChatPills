@@ -79,7 +79,12 @@ const I18N = {
 
 function getLanguage() {
     const context = globalThis.SillyTavern?.getContext?.();
-    const tavernLanguages = [context?.language, context?.locale, document.documentElement.lang];
+    const tavernLanguages = [
+        document.documentElement.lang,
+        context?.getCurrentLocale?.(),
+        context?.locale,
+        context?.language,
+    ];
 
     for (const value of tavernLanguages) {
         const language = String(value || '').trim().toLowerCase();
@@ -614,6 +619,7 @@ function createChatRow(entry, chat) {
     }
 
     const preview = document.createElement('span');
+    preview.className = 'character-chat-modal-row-preview';
     preview.textContent = chat.mes || t('noPreview');
 
     const stats = document.createElement('span');
@@ -1136,7 +1142,7 @@ function initialize() {
     installTopCloseButton();
 
     let activeLanguage = getLanguage();
-    const languageObserver = new MutationObserver(() => {
+    const updateLanguage = () => {
         const language = getLanguage();
         if (language === activeLanguage) return;
 
@@ -1149,11 +1155,13 @@ function initialize() {
             void replaceRecentChats(panel);
         });
         syncTopCloseButton();
-    });
+    };
+    const languageObserver = new MutationObserver(updateLanguage);
     languageObserver.observe(document.documentElement, {
         attributes: true,
         attributeFilter: ['lang'],
     });
+    setInterval(updateLanguage, 1000);
 
     const observer = new MutationObserver(mutations => {
         for (const mutation of mutations) {
