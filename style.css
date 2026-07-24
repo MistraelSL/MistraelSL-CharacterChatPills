@@ -535,8 +535,7 @@
 }
 
 .character-chat-modal-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) max-content;
+    display: flex;
     align-items: center;
     gap: 12px;
     width: 100%;
@@ -566,13 +565,10 @@
 
 .character-chat-modal-row-body {
     display: flex;
-    width: 100%;
     min-width: 0;
-    max-width: 100%;
     flex: 1;
     flex-direction: column;
     gap: 3px;
-    overflow: hidden;
 }
 
 .character-chat-modal-row-title {
@@ -585,11 +581,7 @@
 }
 
 .character-chat-modal-row-title .character-chat-modal-row-name {
-    display: block;
-    flex: 1 1 auto;
-    width: 100%;
     min-width: 0;
-    max-width: 100%;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
@@ -630,24 +622,12 @@
 }
 
 .character-chat-modal-row-preview {
-    display: block;
-    width: 100%;
-    min-width: 0;
-    max-width: 100%;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
-    overflow-wrap: anywhere;
 }
 
 .character-chat-modal-row-stats {
-    display: block;
-    width: 100%;
-    min-width: 0;
-    max-width: 100%;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
     opacity: 0.42;
     font-size: 0.72em;
 }
@@ -657,13 +637,10 @@
 }
 
 .character-chat-modal-row-actions {
-    display: grid;
-    grid-template-columns: repeat(3, 32px);
-    flex: none;
+    display: flex;
+    flex: 0 0 auto;
     gap: 4px;
-    width: 104px;
-    min-width: 104px;
-    max-width: 104px;
+    min-width: 0;
 }
 
 .character-chat-row-action {
@@ -827,7 +804,9 @@
     }
 
     .character-chat-modal-row {
-        grid-template-columns: minmax(0, 1fr) auto;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 122px;
+        align-items: center;
         gap: 7px;
         height: 96px;
         min-height: 96px;
@@ -837,11 +816,16 @@
     }
 
     .character-chat-modal-row-body {
+        min-width: 0;
         max-height: 76px;
+        overflow: hidden;
     }
 
     .character-chat-modal-row-actions {
+        display: grid;
         grid-template-columns: repeat(3, 38px);
+        flex: none;
+        gap: 4px;
         width: 122px;
         min-width: 122px;
         max-width: 122px;
@@ -851,10 +835,6 @@
         width: 38px;
         height: 38px;
         opacity: 0.8;
-    }
-
-    .character-chat-modal-row-preview {
-        overflow-wrap: anywhere;
     }
 
     .character-chat-modal-row-title {
@@ -896,7 +876,49 @@
         width: min(700px, 92vw);
         max-height: 86dvh;
     }
+}
 
+@media screen and (orientation: portrait) and (min-width: 601px) and (max-width: 1024px) {
+    .character-chat-modal-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 104px;
+        align-items: center;
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        box-sizing: border-box;
+        overflow: hidden;
+    }
+
+    .character-chat-modal-row-body,
+    .character-chat-modal-row-title {
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
+    }
+
+    .character-chat-modal-row-name,
+    .character-chat-modal-row-preview,
+    .character-chat-modal-row-stats {
+        display: block;
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+    }
+
+    .character-chat-modal-row-actions {
+        display: grid;
+        grid-template-columns: repeat(3, 32px);
+        flex: none;
+        gap: 4px;
+        width: 104px;
+        min-width: 104px;
+        max-width: 104px;
+    }
 }
 
 @media (hover: none), (pointer: coarse) {
