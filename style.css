@@ -3,6 +3,9 @@
     flex-direction: column;
     gap: 8px;
     width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 .character-chat-browser {
@@ -17,6 +20,8 @@
     align-items: flex-end;
     justify-content: space-between;
     gap: 16px;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .character-chat-browser-title {
@@ -46,6 +51,7 @@
 
 .character-chat-density {
     display: flex;
+    flex: 0 0 auto;
     gap: 4px;
     padding: 3px;
     border: 1px solid var(--SmartThemeBorderColor);
@@ -75,6 +81,8 @@
     display: flex;
     align-items: center;
     gap: 10px;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .character-chat-browser-search {
@@ -87,6 +95,8 @@
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: 12px;
     background: rgba(0, 0, 0, 0.14);
+    box-sizing: border-box;
+    overflow: hidden;
 }
 
 .character-chat-browser-search i {
@@ -95,6 +105,7 @@
 
 .character-chat-browser-search input {
     width: 100%;
+    min-width: 0;
     min-height: 38px;
     border: 0;
     outline: 0;
@@ -143,6 +154,8 @@
     grid-template-columns: repeat(auto-fill, minmax(94px, 1fr));
     gap: 12px;
     width: 100%;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .character-chat-pills-list[data-density="shelf"] {
@@ -226,6 +239,7 @@
     align-items: center;
     gap: 1px;
     padding: 0 3px 4px;
+    overflow: hidden;
 }
 
 .character-chat-pill-name,
@@ -317,6 +331,8 @@
     border-radius: 20px;
     background: var(--SmartThemeBlurTintColor, rgba(20, 20, 28, 0.95));
     background: linear-gradient(110deg, color-mix(in srgb, var(--SmartThemeBlurTintColor) 90%, #111), color-mix(in srgb, var(--ccp-accent) 15%, transparent));
+    box-sizing: border-box;
+    max-width: 100%;
 }
 
 .character-chat-detail-back {
@@ -378,6 +394,8 @@
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .character-chat-detail-row {
@@ -530,6 +548,10 @@
     font: inherit;
     text-align: left;
     cursor: pointer;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
 }
 
 .character-chat-modal-row:hover {
@@ -554,6 +576,8 @@
     min-width: 0;
     align-items: center;
     gap: 7px;
+    max-width: 100%;
+    overflow: hidden;
 }
 
 .character-chat-modal-row-title .character-chat-modal-row-name {
@@ -577,6 +601,7 @@
     font-weight: 700;
     line-height: 1.25;
     white-space: nowrap;
+    max-width: 100%;
 }
 
 .character-chat-latest-badge i {
@@ -615,6 +640,7 @@
     display: flex;
     flex: 0 0 auto;
     gap: 4px;
+    min-width: 0;
 }
 
 .character-chat-row-action {
@@ -835,7 +861,9 @@
     }
 }
 
-@media screen and (min-width: 601px) and (max-width: 1024px) {
+/* Tablets can report desktop-like CSS widths despite high physical resolution.
+   3200x2136 tablets commonly expose a viewport around 1280px after DPR scaling. */
+@media screen and (min-width: 601px) and (max-width: 1366px) {
     .character-chat-browser-toolbar {
         align-items: stretch;
         flex-direction: column;
@@ -854,6 +882,91 @@
     .character-chat-modal {
         width: min(700px, 92vw);
         max-height: 86dvh;
+    }
+
+    .character-chat-detail-header {
+        grid-template-columns: 38px 72px minmax(0, 1fr) auto;
+        gap: 10px;
+    }
+
+    .character-chat-detail-portrait {
+        width: 72px;
+        height: 82px;
+    }
+
+    .character-chat-modal-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 8px;
+        min-height: 96px;
+        padding: 10px;
+    }
+
+    .character-chat-modal-row-body {
+        min-width: 0;
+        overflow: hidden;
+    }
+
+    .character-chat-modal-row-title {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 3px;
+    }
+
+    .character-chat-modal-row-name,
+    .character-chat-modal-row-preview,
+    .character-chat-modal-row-stats {
+        display: block;
+        width: 100%;
+        min-width: 0;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+    }
+
+    .character-chat-modal-row-actions {
+        display: grid;
+        grid-template-columns: repeat(3, 38px);
+        flex: none;
+        gap: 4px;
+    }
+
+    .character-chat-row-action {
+        width: 38px;
+        height: 38px;
+        opacity: 0.8;
+    }
+
+    .character-chat-latest-badge {
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+}
+
+/* Touch tablets in desktop mode may expose a viewport wider than 1366px. */
+@media (pointer: coarse) and (min-width: 601px) {
+    .character-chat-modal-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        min-width: 0;
+        overflow: hidden;
+    }
+
+    .character-chat-modal-row-body,
+    .character-chat-modal-row-title,
+    .character-chat-modal-row-name,
+    .character-chat-modal-row-preview,
+    .character-chat-modal-row-stats {
+        min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .character-chat-modal-row-actions {
+        flex: 0 0 auto;
     }
 }
 
