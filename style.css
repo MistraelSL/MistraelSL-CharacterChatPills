@@ -880,18 +880,27 @@
 
 @media screen and (orientation: portrait) and (min-width: 601px) and (max-width: 1024px) {
     .character-chat-modal-row {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) 104px;
-        align-items: center;
+        display: block;
+        position: relative;
         width: 100%;
         min-width: 0;
         max-width: 100%;
+        padding-right: 129px;
         box-sizing: border-box;
         overflow: hidden;
     }
 
-    .character-chat-modal-row-body,
+    .character-chat-modal-row-body {
+        display: flex;
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
     .character-chat-modal-row-title {
+        display: flex;
         width: 100%;
         min-width: 0;
         max-width: 100%;
@@ -912,8 +921,11 @@
 
     .character-chat-modal-row-actions {
         display: grid;
+        position: absolute;
+        top: 50%;
+        right: 13px;
+        transform: translateY(-50%);
         grid-template-columns: repeat(3, 32px);
-        flex: none;
         gap: 4px;
         width: 104px;
         min-width: 104px;
