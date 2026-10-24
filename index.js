@@ -1,10 +1,11 @@
-import { deleteCharacterChatByName } from '../../../../script.js';
-
 const EXTENSION_NAME = 'MistraelSL Character Chat Pills';
 const PANEL_CLASS = 'character-chat-pills';
-const MAX_RECENT_CHATS = 1000;
+const MAX_RECENT_CHATS = 5000;
+const MAX_IMPORT_BYTES = 20 * 1024 * 1024;
 const RECENT_CACHE_TTL = 60 * 1000;
 const PINNED_CHARACTERS_KEY = 'MistraelSL_CharacterChatPills_pinnedCharacters';
+const ARCHIVED_CHARACTERS_KEY = 'MistraelSL_CharacterChatPills_archivedCharacters';
+const ARCHIVED_CHATS_KEY = 'MistraelSL_CharacterChatPills_archivedChats';
 const FAVORITE_CHATS_KEY = 'MistraelSL_CharacterChatPills_favoriteChats';
 const MOBILE_COLUMNS_KEY = 'MistraelSL_CharacterChatPills_mobileColumns';
 
@@ -25,6 +26,9 @@ const I18N = {
         loadCharactersFailed: 'Could not load character chats. Reload SillyTavern and try again.',
         unnamedChat: 'Unnamed chat', noPreview: 'No message preview', messages: '{count} messages',
         renameChat: 'Rename chat', deleteChat: 'Delete chat', lastUsed: 'Last used',
+        downloadChat: 'Download chat', chatDownloaded: 'Chat downloaded', downloadFailed: 'Could not download chat',
+        importChat: 'Import chat', chatImported: 'Chat imported as "{name}"', importInvalid: 'Invalid chat file',
+        importTooBig: 'File is too large (max 20 MiB)', importFailed: 'Could not import chat',
         lastUsedTitle: 'The chat where the most recent message was written for this character',
         nameNewChat: 'Name your new chat', enterChatName: 'Enter a chat name:',
         deleteQuestion: 'Delete chat?', deleteConfirm: 'Delete “{name}”? This cannot be undone.',
@@ -36,9 +40,14 @@ const I18N = {
         chatsWith: 'Chats with {name}',
         closeChat: 'Close chat',
         pinCharacter: 'Pin character', unpinCharacter: 'Unpin character',
+        archive: 'Archive', library: 'Library', archiveCharacter: 'Archive character',
+        unarchiveCharacter: 'Remove from archive',
+        archiveEmpty: 'Archive is empty. Archived characters will appear here.',
+        archiveChat: 'Archive chat', unarchiveChat: 'Remove from archive', archiveChatsEmpty: 'No archived chats.',
         favoriteChat: 'Favorite chat', unfavoriteChat: 'Remove from favorites',
         undoDelete: 'Undo delete', deletedUndoHint: 'Chat deleted. Click to undo.',
         chatRestored: 'Chat restored', restoreFailed: 'Could not restore chat',
+        restoreNameConflict: 'A chat with this name already exists. Restore cancelled.',
         mobileColumns: 'Characters per row',
         unknownDate: 'Date unknown',
     },
@@ -58,6 +67,9 @@ const I18N = {
         loadCharactersFailed: 'Не удалось загрузить чаты. Перезагрузите SillyTavern и попробуйте снова.',
         unnamedChat: 'Безымянный чат', noPreview: 'Нет превью сообщения', messages: 'Сообщений: {count}',
         renameChat: 'Переименовать чат', deleteChat: 'Удалить чат', lastUsed: 'Последний использованный',
+        downloadChat: 'Скачать чат', chatDownloaded: 'Чат скачан', downloadFailed: 'Не удалось скачать чат',
+        importChat: 'Импорт чата', chatImported: 'Чат импортирован как «{name}»', importInvalid: 'Некорректный файл чата',
+        importTooBig: 'Файл слишком большой (максимум 20 МиБ)', importFailed: 'Не удалось импортировать чат',
         lastUsedTitle: 'Чат, в котором последним было написано сообщение у этого персонажа',
         nameNewChat: 'Назовите новый чат', enterChatName: 'Введите название чата:',
         deleteQuestion: 'Удалить чат?', deleteConfirm: 'Удалить «{name}»? Это действие нельзя отменить.',
@@ -69,9 +81,14 @@ const I18N = {
         chatsWith: 'Чаты с персонажем {name}',
         closeChat: 'Закрыть чат',
         pinCharacter: 'Закрепить персонажа', unpinCharacter: 'Открепить персонажа',
+        archive: 'Архив', library: 'Библиотека', archiveCharacter: 'В архив',
+        unarchiveCharacter: 'Вернуть из архива',
+        archiveEmpty: 'Архив пуст. Здесь появятся заархивированные персонажи.',
+        archiveChat: 'В архив', unarchiveChat: 'Вернуть из архива', archiveChatsEmpty: 'Нет заархивированных чатов.',
         favoriteChat: 'Добавить чат в избранное', unfavoriteChat: 'Убрать чат из избранного',
         undoDelete: 'Отменить удаление', deletedUndoHint: 'Чат удалён. Нажмите, чтобы отменить.',
         chatRestored: 'Чат восстановлен', restoreFailed: 'Не удалось восстановить чат',
+        restoreNameConflict: 'Чат с таким названием уже существует. Восстановление отменено.',
         mobileColumns: 'Персонажей в строке',
         unknownDate: 'Дата неизвестна',
     },
@@ -105,6 +122,23 @@ let renderGeneration = 0;
 let csrfToken = null;
 let recentChatsCache = null;
 let recentChatsCachedAt = 0;
+let namedChatCreationInProgress = false;
+let scriptModulePromise = null;
+
+/**
+ * Loads SillyTavern's native script.js API on demand. A static import would
+ * prevent the whole extension from loading if a future SillyTavern version
+ * renames or moves the native helpers we use.
+ * @returns {Promise<object|null>} Native module exports or null when unavailable
+ */
+function getScriptModule() {
+    scriptModulePromise ??= import('../../../../script.js').catch(error => {
+        console.warn(`${EXTENSION_NAME}: native script.js API is unavailable`, error);
+        scriptModulePromise = null;
+        return null;
+    });
+    return scriptModulePromise;
+}
 
 function loadStringSet(key) {
     try {
@@ -120,14 +154,29 @@ function saveStringSet(key, value) {
 }
 
 const pinnedCharacters = loadStringSet(PINNED_CHARACTERS_KEY);
+const archivedCharacters = loadStringSet(ARCHIVED_CHARACTERS_KEY);
+const archivedChats = loadStringSet(ARCHIVED_CHATS_KEY);
 const favoriteChats = loadStringSet(FAVORITE_CHATS_KEY);
+let lastBrowserView = 'library';
 
 function getChatKey(avatar, fileName) {
-    return `${avatar}::${String(fileName || '').toLocaleLowerCase()}`;
+    // Locale-independent: keys must not change with the user's locale
+    // (toLocaleLowerCase maps 'I' differently in Turkish, breaking lookups).
+    return `${avatar}::${String(fileName || '').toLowerCase()}`;
 }
 
 function isFavoriteChat(entry, chat) {
     return favoriteChats.has(getChatKey(entry.avatar, chat.file_name));
+}
+
+function isArchivedChat(entry, chat) {
+    return archivedChats.has(getChatKey(entry.avatar, chat.file_name));
+}
+
+// Archive is visual-only: archived chats leave the normal list and show up
+// only in the archive window. Nothing is moved or renamed on disk.
+function filterChatsByView(entry, chats, archivedOnly) {
+    return chats.filter(chat => archivedOnly ? isArchivedChat(entry, chat) : !isArchivedChat(entry, chat));
 }
 
 function sortCharacterChats(entry, chats) {
@@ -149,21 +198,35 @@ async function getCsrfToken() {
     return csrfToken;
 }
 
-async function getRecentChats(force = false) {
-    if (!force && recentChatsCache && Date.now() - recentChatsCachedAt < RECENT_CACHE_TTL) {
-        return recentChatsCache;
-    }
-
-    const token = await getCsrfToken();
-    const response = await fetch('/api/chats/recent', {
+/**
+ * POSTs to a SillyTavern API endpoint with the CSRF token. The token dies with
+ * the server process, so on a 403 the token is refetched once and retried.
+ */
+async function fetchApi(path, body) {
+    const makeRequest = token => fetch(path, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'X-CSRF-Token': token,
         },
-        body: JSON.stringify({ max: MAX_RECENT_CHATS, pinned: [] }),
+        body: JSON.stringify(body),
         cache: 'no-cache',
     });
+
+    let response = await makeRequest(await getCsrfToken());
+    if (response.status === 403) {
+        csrfToken = null;
+        response = await makeRequest(await getCsrfToken());
+    }
+    return response;
+}
+
+async function getRecentChats(force = false) {
+    if (!force && recentChatsCache && Date.now() - recentChatsCachedAt < RECENT_CACHE_TTL) {
+        return recentChatsCache;
+    }
+
+    const response = await fetchApi('/api/chats/recent', { max: MAX_RECENT_CHATS, pinned: [] });
 
     if (!response.ok) throw new Error(t('recentFailed', { status: response.status }));
     const chats = await response.json();
@@ -254,6 +317,16 @@ function makeAvatarUrl(avatar) {
     return `/thumbnail?type=avatar&file=${encodeURIComponent(avatar)}`;
 }
 
+/**
+ * Replaces a missing avatar image with SillyTavern's default one.
+ * @param {HTMLImageElement} img
+ */
+function setAvatarFallback(img) {
+    img.addEventListener('error', () => {
+        img.src = '/img/ai4.png';
+    }, { once: true });
+}
+
 const dateFormatters = new Map();
 
 function formatDate(timestamp) {
@@ -292,11 +365,10 @@ function markLastActiveChat(chats) {
     if (latest) latest.isLastActive = true;
 }
 
-function createCharacterPill(entry) {
+function createCharacterPill(entry, isArchiveView = false) {
     const pill = document.createElement('button');
     pill.type = 'button';
     pill.className = 'character-chat-pill';
-    pill.dataset.search = (entry.character.name || '').toLocaleLowerCase();
 
     const avatar = document.createElement('img');
     avatar.className = 'character-chat-pill-avatar';
@@ -304,6 +376,7 @@ function createCharacterPill(entry) {
     avatar.alt = entry.character.name || t('character');
     avatar.loading = 'lazy';
     avatar.decoding = 'async';
+    setAvatarFallback(avatar);
 
     const name = document.createElement('strong');
     name.className = 'character-chat-pill-name';
@@ -339,6 +412,28 @@ function createCharacterPill(entry) {
     });
     updatePinLabel();
 
+    const archiveButton = document.createElement('span');
+    archiveButton.className = 'character-chat-pill-archive';
+    archiveButton.classList.toggle('is-archived', isArchiveView);
+    archiveButton.setAttribute('role', 'button');
+    archiveButton.setAttribute('tabindex', '0');
+    archiveButton.innerHTML = `<i class="fa-solid ${isArchiveView ? 'fa-box-open' : 'fa-box-archive'}"></i>`;
+    archiveButton.title = isArchiveView ? t('unarchiveCharacter') : t('archiveCharacter');
+    archiveButton.setAttribute('aria-label', archiveButton.title);
+    const toggleArchive = event => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (isArchiveView) archivedCharacters.delete(entry.avatar);
+        else archivedCharacters.add(entry.avatar);
+        saveStringSet(ARCHIVED_CHARACTERS_KEY, archivedCharacters);
+        const browser = pill.closest('.character-chat-browser');
+        browser?._refreshCharacters?.();
+    };
+    archiveButton.addEventListener('click', toggleArchive);
+    archiveButton.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') toggleArchive(event);
+    });
+
     const date = document.createElement('span');
     date.className = 'character-chat-pill-date';
     date.textContent = formatDate(entry.latestTimestamp);
@@ -347,22 +442,13 @@ function createCharacterPill(entry) {
     caption.className = 'character-chat-pill-caption';
     caption.append(name, date);
 
-    pill.append(avatar, caption, count, pin);
+    pill.append(avatar, caption, count, pin, archiveButton);
     pill.addEventListener('click', () => openCharacterChats(entry));
     return pill;
 }
 
 async function fetchCharacterChats(avatar) {
-    const token = await getCsrfToken();
-    const response = await fetch('/api/characters/chats', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': token,
-        },
-        body: JSON.stringify({ avatar_url: avatar }),
-        cache: 'no-cache',
-    });
+    const response = await fetchApi('/api/characters/chats', { avatar_url: avatar });
 
     if (!response.ok) throw new Error(t('historyFailed', { status: response.status }));
     const chats = await response.json();
@@ -370,16 +456,7 @@ async function fetchCharacterChats(avatar) {
 }
 
 async function requestJson(path, body) {
-    const token = await getCsrfToken();
-    const response = await fetch(path, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': token,
-        },
-        body: JSON.stringify(body),
-        cache: 'no-cache',
-    });
+    const response = await fetchApi(path, body);
 
     if (!response.ok) throw new Error(t('requestFailed', { status: response.status }));
     const contentType = response.headers.get('content-type') || '';
@@ -422,7 +499,151 @@ async function renameChatFile(entry, chat, requestedName) {
     const finalName = result.sanitizedFileName || newName;
     chat.file_name = `${finalName}.jsonl`;
     recentChatsCache = null;
+    await syncRenamedChatState(entry, oldName, oldFile, finalName);
     return finalName;
+}
+
+/**
+ * Keeps SillyTavern's native state consistent after a chat rename done via a
+ * direct REST call: moves the live chat metadata and the character's
+ * active-chat pointer when they referenced the old file, then emits
+ * CHAT_RENAMED so native pinned chats and other extensions can migrate.
+ * @param {object} entry Character entry owning the chat
+ * @param {string} oldName Previous chat name without extension
+ * @param {string} oldFile Previous chat file name with extension
+ * @param {string} newName New chat name without extension
+ */
+async function syncRenamedChatState(entry, oldName, oldFile, newName) {
+    try {
+        const context = SillyTavern?.getContext?.();
+        const characters = context?.characters || [];
+        const characterId = characters.findIndex(character => character.avatar === entry.avatar);
+        const character = characters[characterId];
+
+        // If the renamed chat is currently open, point live chat metadata at
+        // the new file name so autosaves don't recreate the old file.
+        const currentChatId = String(context?.getCurrentChatId?.() || '').replace(/\.jsonl$/i, '');
+        if (currentChatId && currentChatId === oldName && context?.chatMetadata) {
+            context.chatMetadata.file_name = newName;
+        }
+
+        if (character && String(character.chat || '').replace(/\.jsonl$/i, '') === oldName) {
+            character.chat = newName;
+            const scriptModule = await getScriptModule();
+            if (typeof scriptModule?.updateRemoteChatName === 'function') {
+                await scriptModule.updateRemoteChatName(characterId, newName);
+            }
+        }
+
+        const eventTypes = context?.eventTypes;
+        if (typeof context?.eventSource?.emit === 'function' && eventTypes?.CHAT_RENAMED) {
+            await context.eventSource.emit(eventTypes.CHAT_RENAMED, {
+                avatarId: entry.avatar,
+                groupId: '',
+                oldFileName: oldFile,
+                newFileName: `${newName}.jsonl`,
+            });
+        }
+    } catch (error) {
+        console.warn(`${EXTENSION_NAME}: failed to sync native state after rename`, error);
+    }
+}
+
+/**
+ * Downloads a chat as an importable JSONL file (same shape SillyTavern's
+ * chat manager accepts on import: metadata header line + one line per message).
+ */
+async function downloadChat(entry, chat) {
+    try {
+        const fileName = String(chat.file_name || '').replace(/\.jsonl$/i, '');
+        const data = await requestJson('/api/chats/get', {
+            avatar_url: entry.avatar,
+            file_name: fileName,
+        });
+        if (!Array.isArray(data) || !data.length) throw new Error(t('downloadFailed'));
+
+        const jsonl = data.map(item => JSON.stringify(item)).join('\n') + '\n';
+        const url = URL.createObjectURL(new Blob([jsonl], { type: 'application/x-ndjson;charset=utf-8' }));
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `${fileName}.jsonl`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        if (typeof toastr !== 'undefined') toastr.success(t('chatDownloaded'), EXTENSION_NAME);
+    } catch (error) {
+        console.error(`${EXTENSION_NAME}: failed to download chat`, error);
+        if (typeof toastr !== 'undefined') toastr.error(error.message, EXTENSION_NAME);
+    }
+}
+
+/**
+ * Imports a chat from a JSONL file (the format produced by "Download chat" and
+ * SillyTavern's own chat export). Always writes under a free file name — an
+ * existing chat is never overwritten.
+ */
+async function importChatFile(entry) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.jsonl';
+    input.onchange = async () => {
+        const file = input.files?.[0];
+        if (!file) return;
+        try {
+            if (file.size > MAX_IMPORT_BYTES) throw new Error(t('importTooBig'));
+
+            let data;
+            try {
+                // Tolerate a UTF-8 BOM, CRLF endings and blank lines.
+                const text = (await file.text()).replace(/^\uFEFF/, '');
+                data = text.trim().split('\n').map(line => line.trim()).filter(Boolean).map(line => JSON.parse(line));
+            } catch (parseError) {
+                console.error(`${EXTENSION_NAME}: import parse error`, parseError);
+                throw new Error(t('importInvalid'));
+            }
+            if (!data.length || data.some(item => !item || typeof item !== 'object' || Array.isArray(item))) {
+                throw new Error(t('importInvalid'));
+            }
+            // Headerless file (no metadata line at all) — synthesize one.
+            if (typeof data[0].mes === 'string') {
+                data.unshift({ user_name: 'User', character_name: entry.character.name || 'Character', chat_metadata: {} });
+            }
+            if (data.length < 2 || data.slice(1).some(message => typeof message.mes !== 'string')) {
+                throw new Error(t('importInvalid'));
+            }
+            // Old chats predate chat_metadata in the header.
+            if (typeof data[0].chat_metadata !== 'object' || data[0].chat_metadata === null || Array.isArray(data[0].chat_metadata)) {
+                data[0].chat_metadata = {};
+            }
+
+            const baseName = String(file.name || 'import').replace(/\.jsonl$/i, '').trim() || 'import';
+            const existing = new Set((await fetchCharacterChats(entry.avatar))
+                .map(item => String(item.file_name || '').replace(/\.jsonl$/i, '').toLowerCase()));
+            let name = baseName;
+            for (let n = 2; existing.has(name.toLowerCase()); n++) name = `${baseName} (${n})`;
+
+            // The imported copy must not keep a branch link into another chat.
+            data[0].chat_metadata = { ...data[0].chat_metadata, file_name: name };
+            delete data[0].chat_metadata.main_chat;
+
+            await requestJson('/api/chats/save', {
+                avatar_url: entry.avatar,
+                file_name: name,
+                chat: data,
+                force: true,
+            });
+            recentChatsCache = null;
+
+            const root = document.querySelector('.character-chat-detail, .character-chat-modal');
+            if (root) await refreshVisibleChatList(entry, root);
+            if (typeof toastr !== 'undefined') toastr.success(t('chatImported', { name }), EXTENSION_NAME);
+        } catch (error) {
+            console.error(`${EXTENSION_NAME}: failed to import chat`, error);
+            if (typeof toastr !== 'undefined') toastr.error(error.message || t('importFailed'), EXTENSION_NAME);
+        }
+    };
+    input.click();
 }
 
 async function renameChat(entry, chat, row) {
@@ -433,12 +654,18 @@ async function renameChat(entry, chat, row) {
     try {
         const oldFavoriteKey = getChatKey(entry.avatar, chat.file_name);
         const wasFavorite = favoriteChats.has(oldFavoriteKey);
+        const wasArchived = archivedChats.has(oldFavoriteKey);
         const finalName = await renameChatFile(entry, chat, newName);
         if (!finalName) return;
         if (wasFavorite) {
             favoriteChats.delete(oldFavoriteKey);
             favoriteChats.add(getChatKey(entry.avatar, chat.file_name));
             saveStringSet(FAVORITE_CHATS_KEY, favoriteChats);
+        }
+        if (wasArchived) {
+            archivedChats.delete(oldFavoriteKey);
+            archivedChats.add(getChatKey(entry.avatar, chat.file_name));
+            saveStringSet(ARCHIVED_CHATS_KEY, archivedChats);
         }
         const name = row.querySelector('.character-chat-modal-row-name');
         if (name) name.textContent = finalName;
@@ -469,7 +696,17 @@ async function deleteChat(entry, chat, row) {
         // updates the character's active-chat pointer and in-memory state. A
         // direct endpoint call left an open deleted chat in memory, so ST saved
         // it again during reload and made it appear to return.
-        await deleteCharacterChatByName(String(characterId), fileName);
+        const scriptModule = await getScriptModule();
+        if (typeof scriptModule?.deleteCharacterChatByName === 'function') {
+            await scriptModule.deleteCharacterChatByName(String(characterId), fileName);
+        } else {
+            // Fallback for SillyTavern versions without the native helper. The
+            // verification fetch below catches a failed deletion either way.
+            await requestJson('/api/chats/delete', {
+                chatfile: `${fileName}.jsonl`,
+                avatar_url: entry.avatar,
+            });
+        }
 
         const remainingChats = await fetchCharacterChats(entry.avatar);
         if (remainingChats.some(item => String(item.file_name || '').replace(/\.jsonl$/i, '') === fileName)) {
@@ -479,6 +716,8 @@ async function deleteChat(entry, chat, row) {
         recentChatsCache = null;
         favoriteChats.delete(getChatKey(entry.avatar, chat.file_name));
         saveStringSet(FAVORITE_CHATS_KEY, favoriteChats);
+        archivedChats.delete(getChatKey(entry.avatar, chat.file_name));
+        saveStringSet(ARCHIVED_CHATS_KEY, archivedChats);
         const root = row.closest('.character-chat-detail, .character-chat-modal');
         await refreshVisibleChatList(entry, root);
 
@@ -489,6 +728,14 @@ async function deleteChat(entry, chat, row) {
                 closeButton: true,
                 onclick: async () => {
                     try {
+                        // A chat with the same name may have been created after
+                        // the deletion. Never overwrite it with the backup.
+                        const existingChats = await fetchCharacterChats(entry.avatar);
+                        const nameTaken = existingChats.some(item => String(item.file_name || '').replace(/\.jsonl$/i, '') === fileName);
+                        if (nameTaken) {
+                            toastr.warning(t('restoreNameConflict'), EXTENSION_NAME);
+                            return;
+                        }
                         await requestJson('/api/chats/save', {
                             avatar_url: entry.avatar,
                             file_name: fileName,
@@ -511,57 +758,116 @@ async function deleteChat(entry, chat, row) {
     }
 }
 
-async function refreshVisibleChatList(entry, root) {
-    if (!root?.isConnected) return;
-    const list = root.querySelector('.character-chat-detail-list, .character-chat-modal-list');
-    if (!list) return;
-
-    const chats = await fetchCharacterChats(entry.avatar);
-    sortCharacterChats(entry, chats);
-    list.replaceChildren(...chats.map(chat => {
-        const row = createChatRow(entry, chat);
-        if (list.classList.contains('character-chat-detail-list')) row.classList.add('character-chat-detail-row');
-        return row;
-    }));
-    if (!chats.length) showEmptyState(list, t('noChats'));
-    updateVisibleChatCount(root);
+/**
+ * Applies a search query to the rendered chat rows. Chat data is read from the
+ * rows themselves, so filtering stays correct after the list is re-rendered
+ * (favorite toggles, renames, deletions).
+ * @param {HTMLElement} list Chat list element
+ * @param {string} query Raw search query
+ */
+function filterChatRows(list, query) {
+    const normalized = String(query || '').trim().toLocaleLowerCase();
+    list.querySelectorAll('.character-chat-modal-row').forEach(row => {
+        const chat = row._chat || {};
+        const haystack = `${chat.file_name || ''} ${chat.mes || ''}`.toLocaleLowerCase();
+        row.hidden = Boolean(normalized) && !haystack.includes(normalized);
+    });
 }
 
-function updateVisibleChatCount(root) {
+function refreshChatListSafely(entry, root) {
+    refreshVisibleChatList(entry, root).catch(error => {
+        console.error(`${EXTENSION_NAME}: failed to refresh chat list`, error);
+        if (typeof toastr !== 'undefined') toastr.error(t('loadChatsFailedShort'), EXTENSION_NAME);
+    });
+}
+
+async function refreshVisibleChatList(entry, root) {
+    if (!root?.isConnected) return;
+    // Every visible chat list (the detail panel and/or the archive window) must
+    // reflect the change, not just the one the action came from. One fetch,
+    // rendered into each root with its own archive filter.
+    const roots = [root];
+    document.querySelectorAll('.character-chat-detail, .character-chat-modal').forEach(other => {
+        if (other !== root && other.isConnected) roots.push(other);
+    });
+
+    const chats = await fetchCharacterChats(entry.avatar);
+    for (const target of roots) {
+        const list = target.querySelector('.character-chat-detail-list, .character-chat-modal-list');
+        if (!list) continue;
+        const archivedOnly = target.classList.contains('character-chat-archive-view');
+        const visibleChats = filterChatsByView(entry, [...chats], archivedOnly);
+        sortCharacterChats(entry, visibleChats);
+        list.replaceChildren(...visibleChats.map(chat => {
+            const row = createChatRow(entry, chat);
+            if (list.classList.contains('character-chat-detail-list')) row.classList.add('character-chat-detail-row');
+            return row;
+        }));
+        if (!visibleChats.length) showEmptyState(list, archivedOnly ? t('archiveChatsEmpty') : t('noChats'));
+        updateVisibleChatCount(target, visibleChats);
+
+        const searchInput = target.querySelector('.character-chat-modal-search, .character-chat-detail-controls input[type="search"]');
+        filterChatRows(list, searchInput?.value);
+    }
+}
+
+function updateVisibleChatCount(root, chats = null) {
     if (!root) return;
-    const count = root.querySelectorAll('.character-chat-modal-row').length;
     const summary = root.querySelector('[data-chat-count]');
-    if (summary) summary.textContent = t('chatsCount', { count });
+    if (!summary) return;
+
+    const count = root.querySelectorAll('.character-chat-modal-row').length;
+    if (chats?.length && root.classList.contains('character-chat-detail')) {
+        // Detail view shows the richer "last active" summary; recompute it
+        // from the fresh chat list instead of degrading to a bare count.
+        const latestTimestamp = Math.max(0, ...chats.map(chat => getChatTimestamp(chat)));
+        summary.textContent = t('lastActiveSummary', { count, date: formatDate(latestTimestamp) });
+    } else {
+        summary.textContent = t('chatsCount', { count });
+    }
 }
 
 async function createNamedChat(entry) {
-    const requestedName = await askForName(t('nameNewChat'));
-    if (!requestedName) return;
+    if (namedChatCreationInProgress) return;
+    namedChatCreationInProgress = true;
 
     try {
-        const context = SillyTavern?.getContext?.();
-        const characters = context?.characters || [];
-        const characterId = characters.findIndex(character => character.avatar === entry.avatar);
-        if (characterId < 0) throw new Error(t('unavailable'));
+        const requestedName = await askForName(t('nameNewChat'));
+        if (!requestedName) return;
 
-        closeChatModal();
-        await context.selectCharacterById(characterId);
-        await context.executeSlashCommandsWithOptions('/newchat', {
-            displayCommand: false,
-            showOutput: false,
-        });
+        try {
+            const context = SillyTavern?.getContext?.();
+            const characters = context?.characters || [];
+            const characterId = characters.findIndex(character => character.avatar === entry.avatar);
+            if (characterId < 0) throw new Error(t('unavailable'));
 
-        const generatedName = context.getCurrentChatId?.() || characters[characterId]?.chat;
-        if (!generatedName) throw new Error(t('newChatNameMissing'));
+            closeChatModal();
+            await context.selectCharacterById(characterId);
+            await context.executeSlashCommandsWithOptions('/newchat', {
+                displayCommand: false,
+                showOutput: false,
+            });
 
-        const temporaryChat = { file_name: `${String(generatedName).replace(/\.jsonl$/i, '')}.jsonl` };
-        const finalName = await renameChatFile(entry, temporaryChat, requestedName);
-        if (finalName && typeof context.openCharacterChat === 'function') {
-            await context.openCharacterChat(finalName);
+            const generatedName = context.getCurrentChatId?.() || characters[characterId]?.chat;
+            if (!generatedName) throw new Error(t('newChatNameMissing'));
+
+            const temporaryChat = { file_name: `${String(generatedName).replace(/\.jsonl$/i, '')}.jsonl` };
+            const finalName = await renameChatFile(entry, temporaryChat, requestedName);
+            if (finalName && typeof context.openCharacterChat === 'function') {
+                // The fresh chat is already open and was repointed to the new
+                // name by syncRenamedChatState; reopening is only needed when
+                // the sync could not run.
+                const currentChatId = String(context.getCurrentChatId?.() || '').replace(/\.jsonl$/i, '');
+                if (currentChatId !== finalName) {
+                    await context.openCharacterChat(finalName);
+                }
+            }
+        } catch (error) {
+            console.error(`${EXTENSION_NAME}: failed to create named chat`, error);
+            if (typeof toastr !== 'undefined') toastr.error(error.message, EXTENSION_NAME);
         }
-    } catch (error) {
-        console.error(`${EXTENSION_NAME}: failed to create named chat`, error);
-        if (typeof toastr !== 'undefined') toastr.error(error.message, EXTENSION_NAME);
+    } finally {
+        namedChatCreationInProgress = false;
     }
 }
 
@@ -587,7 +893,15 @@ async function openExactChat(entry, fileName) {
     }
 }
 
+let activeModalEscapeHandler = null;
+
 function closeChatModal() {
+    // The Escape listener must not outlive the modal: a stale listener on
+    // document would keep intercepting keystrokes meant for other UI.
+    if (activeModalEscapeHandler) {
+        document.removeEventListener('keydown', activeModalEscapeHandler, true);
+        activeModalEscapeHandler = null;
+    }
     const overlay = document.getElementById('character-chat-pills-overlay');
     if (!overlay) return;
     overlay.classList.add('closing');
@@ -598,6 +912,7 @@ function createChatRow(entry, chat) {
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'character-chat-modal-row';
+    row._chat = chat;
 
     const body = document.createElement('span');
     body.className = 'character-chat-modal-row-body';
@@ -634,7 +949,10 @@ function createChatRow(entry, chat) {
 
     const favorite = createIconButton('fa-star', isFavoriteChat(entry, chat) ? t('unfavoriteChat') : t('favoriteChat'), 'character-chat-row-action character-chat-favorite-action');
     favorite.classList.toggle('is-favorite', isFavoriteChat(entry, chat));
+    const download = createIconButton('fa-download', t('downloadChat'), 'character-chat-row-action');
     const rename = createIconButton('fa-pen', t('renameChat'), 'character-chat-row-action');
+    const archive = createIconButton(isArchivedChat(entry, chat) ? 'fa-box-open' : 'fa-box-archive',
+        isArchivedChat(entry, chat) ? t('unarchiveChat') : t('archiveChat'), 'character-chat-row-action');
     const remove = createIconButton('fa-trash', t('deleteChat'), 'character-chat-row-action is-danger');
     favorite.addEventListener('click', event => {
         event.stopPropagation();
@@ -642,7 +960,19 @@ function createChatRow(entry, chat) {
         favoriteChats.has(key) ? favoriteChats.delete(key) : favoriteChats.add(key);
         saveStringSet(FAVORITE_CHATS_KEY, favoriteChats);
         const root = row.closest('.character-chat-detail, .character-chat-modal');
-        void refreshVisibleChatList(entry, root);
+        refreshChatListSafely(entry, root);
+    });
+    archive.addEventListener('click', event => {
+        event.stopPropagation();
+        const key = getChatKey(entry.avatar, chat.file_name);
+        archivedChats.has(key) ? archivedChats.delete(key) : archivedChats.add(key);
+        saveStringSet(ARCHIVED_CHATS_KEY, archivedChats);
+        const root = row.closest('.character-chat-detail, .character-chat-modal');
+        refreshChatListSafely(entry, root);
+    });
+    download.addEventListener('click', event => {
+        event.stopPropagation();
+        void downloadChat(entry, chat);
     });
     rename.addEventListener('click', event => {
         event.stopPropagation();
@@ -652,7 +982,7 @@ function createChatRow(entry, chat) {
         event.stopPropagation();
         void deleteChat(entry, chat, row);
     });
-    actions.append(favorite, rename, remove);
+    actions.append(favorite, download, rename, archive, remove);
 
     body.append(titleLine, preview, stats);
     row.append(body, actions);
@@ -660,7 +990,7 @@ function createChatRow(entry, chat) {
     return row;
 }
 
-async function openCharacterChatsModal(entry) {
+async function openCharacterChatsModal(entry, archivedOnly = false) {
     closeChatModal();
 
     const overlay = document.createElement('div');
@@ -669,6 +999,7 @@ async function openCharacterChatsModal(entry) {
 
     const modal = document.createElement('section');
     modal.className = 'character-chat-modal';
+    modal.classList.toggle('character-chat-archive-view', archivedOnly);
     modal.setAttribute('role', 'dialog');
     modal.setAttribute('aria-modal', 'true');
     modal.setAttribute('aria-label', t('chatsWith', { name: entry.character.name || t('character') }));
@@ -687,15 +1018,21 @@ async function openCharacterChatsModal(entry) {
     avatar.className = 'character-chat-modal-avatar';
     avatar.src = makeAvatarUrl(entry.avatar);
     avatar.alt = '';
+    setAvatarFallback(avatar);
 
     const heading = document.createElement('span');
     heading.className = 'character-chat-modal-heading';
     const title = document.createElement('strong');
-    title.textContent = entry.character.name || t('unnamedCharacter');
+    title.textContent = archivedOnly
+        ? `${t('archive')} — ${entry.character.name || t('unnamedCharacter')}`
+        : (entry.character.name || t('unnamedCharacter'));
     const subtitle = document.createElement('span');
     subtitle.dataset.chatCount = '';
     subtitle.textContent = t('loadingChats');
     heading.append(title, subtitle);
+
+    const importButton = createIconButton('fa-file-import', t('importChat'), 'character-chat-modal-import');
+    importButton.addEventListener('click', () => importChatFile(entry));
 
     const newChat = document.createElement('button');
     newChat.type = 'button';
@@ -703,7 +1040,8 @@ async function openCharacterChatsModal(entry) {
     newChat.innerHTML = `<i class="fa-solid fa-plus"></i><span>${t('newChat')}</span>`;
     newChat.addEventListener('click', () => createNamedChat(entry));
 
-    header.append(close, avatar, heading, newChat);
+    header.append(close, avatar, heading);
+    if (!archivedOnly) header.append(importButton, newChat);
 
     const search = document.createElement('input');
     search.type = 'search';
@@ -717,37 +1055,31 @@ async function openCharacterChatsModal(entry) {
 
     modal.append(header, search, list);
     overlay.appendChild(modal);
+    // Keep the fixed overlay outside body: mobile themes can transform body,
+    // which otherwise positions the overlay relative to the whole page.
     document.documentElement.appendChild(overlay);
 
     overlay.addEventListener('click', event => {
         if (event.target === overlay) closeChatModal();
     });
 
-    const escapeHandler = event => {
+    activeModalEscapeHandler = event => {
         if (event.key !== 'Escape' || !overlay.isConnected) return;
         event.stopPropagation();
         closeChatModal();
-        document.removeEventListener('keydown', escapeHandler, true);
     };
-    document.addEventListener('keydown', escapeHandler, true);
+    document.addEventListener('keydown', activeModalEscapeHandler, true);
 
     try {
-        const chats = await fetchCharacterChats(entry.avatar);
+        const chats = filterChatsByView(entry, await fetchCharacterChats(entry.avatar), archivedOnly);
         sortCharacterChats(entry, chats);
         if (!overlay.isConnected) return;
 
         subtitle.textContent = t('chatsCount', { count: chats.length });
         list.replaceChildren(...chats.map(chat => createChatRow(entry, chat)));
-        if (!chats.length) showEmptyState(list, t('noChats'));
+        if (!chats.length) showEmptyState(list, archivedOnly ? t('archiveChatsEmpty') : t('noChats'));
 
-        search.addEventListener('input', () => {
-            const query = search.value.trim().toLocaleLowerCase();
-            list.querySelectorAll('.character-chat-modal-row').forEach((row, index) => {
-                const chat = chats[index];
-                const haystack = `${chat.file_name || ''} ${chat.mes || ''}`.toLocaleLowerCase();
-                row.hidden = Boolean(query) && !haystack.includes(query);
-            });
-        });
+        search.addEventListener('input', () => filterChatRows(list, search.value));
     } catch (error) {
         console.error(`${EXTENSION_NAME}: failed to load character chats`, error);
         subtitle.textContent = t('loadChatsFailedShort');
@@ -765,9 +1097,12 @@ function createIconButton(icon, label, className = '') {
     return button;
 }
 
-function getFilteredEntries(entries, search, filter) {
+function getFilteredEntries(entries, search, filter, view = 'library') {
     const query = search.trim().toLocaleLowerCase();
     let result = entries.filter(entry => !query || (entry.character.name || '').toLocaleLowerCase().includes(query));
+    // Archive is visual-only: nothing moves on disk, archived characters just
+    // leave the library view (and only they show up in the archive view).
+    result = result.filter(entry => view === 'archive' ? archivedCharacters.has(entry.avatar) : !archivedCharacters.has(entry.avatar));
 
     if (filter === 'frequent') {
         result = [...result].sort((a, b) => b.chats.length - a.chats.length || b.latestTimestamp - a.latestTimestamp);
@@ -785,17 +1120,19 @@ function getFilteredEntries(entries, search, filter) {
 }
 
 function renderCharacterCollection(list, entries, state) {
-    const filtered = getFilteredEntries(entries, state.search, state.filter);
+    const filtered = getFilteredEntries(entries, state.search, state.filter, state.view);
     list.dataset.density = state.density;
 
     const fragment = document.createDocumentFragment();
     filtered.forEach((entry) => {
-        const pill = createCharacterPill(entry);
+        const pill = createCharacterPill(entry, state.view === 'archive');
         fragment.appendChild(pill);
     });
 
     list.replaceChildren(fragment);
-    if (!filtered.length) showEmptyState(list, t('noCharacters'));
+    if (!filtered.length) {
+        showEmptyState(list, state.view === 'archive' && !archivedCharacters.size ? t('archiveEmpty') : t('noCharacters'));
+    }
 }
 
 function createSegmentedButton(icon, label, value, state, onSelect) {
@@ -813,6 +1150,7 @@ function renderCharacterBrowser(container, entries) {
     const state = {
         search: '',
         filter: 'recent',
+        view: lastBrowserView,
         density: localStorage.getItem('MistraelSL_CharacterChatPills_density')
             || localStorage.getItem('CharacterChatPills_density')
             || 'shelf',
@@ -878,6 +1216,9 @@ function renderCharacterBrowser(container, entries) {
         filters.querySelectorAll('.character-chat-segment').forEach(button => {
             button.classList.toggle('is-active', button.dataset.value === state.filter);
         });
+        archiveButton.classList.toggle('is-active', state.view === 'archive');
+        archiveButton.querySelector('span').textContent = state.view === 'archive' ? t('library') : t('archive');
+        titleBlock.querySelector('strong').textContent = state.view === 'archive' ? t('archive') : t('chooseCharacter');
         shelfButton.classList.toggle('is-active', state.density === 'shelf');
         compactButton.classList.toggle('is-active', state.density === 'compact');
         mobileDensity.querySelectorAll('button').forEach(button => {
@@ -923,7 +1264,13 @@ function renderCharacterBrowser(container, entries) {
         refresh();
     });
 
-    toolbar.append(searchWrap, filters);
+    const archiveButton = createSegmentedButton('fa-box-archive', t('archive'), 'archive', state.view, () => {
+        state.view = state.view === 'archive' ? 'library' : 'archive';
+        lastBrowserView = state.view;
+        refresh();
+    });
+
+    toolbar.append(searchWrap, archiveButton, filters);
     container.append(hero, toolbar, list);
     refresh();
 }
@@ -941,7 +1288,6 @@ async function openCharacterChats(entry) {
         return;
     }
 
-    const welcomeRecent = container.closest('.welcomeRecent');
     const welcomePanel = container.closest('.welcomePanel');
     const title = welcomePanel?.querySelector('.recentChatsTitle');
     if (title) title.textContent = t('characterChats');
@@ -958,6 +1304,7 @@ async function openCharacterChats(entry) {
     const avatar = document.createElement('img');
     avatar.src = makeAvatarUrl(entry.avatar);
     avatar.alt = entry.character.name || t('character');
+    setAvatarFallback(avatar);
     portrait.appendChild(avatar);
 
     const identity = document.createElement('div');
@@ -971,13 +1318,23 @@ async function openCharacterChats(entry) {
     summary.textContent = t('loadingHistory');
     identity.append(kicker, name, summary);
 
+    const archiveViewButton = createIconButton('fa-box-archive', t('archive'), 'character-chat-detail-archive');
+    archiveViewButton.addEventListener('click', () => openCharacterChatsModal(entry, true));
+
+    const importButton = createIconButton('fa-file-import', t('importChat'), 'character-chat-detail-import');
+    importButton.addEventListener('click', () => importChatFile(entry));
+
     const newChat = document.createElement('button');
     newChat.type = 'button';
     newChat.className = 'character-chat-detail-new';
     newChat.innerHTML = `<i class="fa-solid fa-plus"></i><span>${t('newChat')}</span>`;
     newChat.addEventListener('click', () => createNamedChat(entry));
 
-    header.append(back, portrait, identity, newChat);
+    const headerActions = document.createElement('div');
+    headerActions.className = 'character-chat-detail-actions';
+    headerActions.append(archiveViewButton, importButton, newChat);
+
+    header.append(back, portrait, identity, headerActions);
 
     const controls = document.createElement('div');
     controls.className = 'character-chat-detail-controls';
@@ -1011,7 +1368,7 @@ async function openCharacterChats(entry) {
     back.addEventListener('click', restoreBrowser);
 
     try {
-        const chats = await fetchCharacterChats(entry.avatar);
+        const chats = filterChatsByView(entry, await fetchCharacterChats(entry.avatar), false);
         sortCharacterChats(entry, chats);
         if (!container.isConnected || !container.classList.contains('character-chat-detail')) return;
 
@@ -1019,14 +1376,7 @@ async function openCharacterChats(entry) {
         list.replaceChildren(...chats.map(chat => createInlineChatRow(entry, chat)));
         if (!chats.length) showEmptyState(list, t('noChats'));
 
-        search.addEventListener('input', () => {
-            const query = search.value.trim().toLocaleLowerCase();
-            list.querySelectorAll('.character-chat-detail-row').forEach((row, index) => {
-                const chat = chats[index];
-                const haystack = `${chat.file_name || ''} ${chat.mes || ''}`.toLocaleLowerCase();
-                row.hidden = Boolean(query) && !haystack.includes(query);
-            });
-        });
+        search.addEventListener('input', () => filterChatRows(list, search.value));
     } catch (error) {
         console.error(`${EXTENSION_NAME}: failed to load character chats`, error);
         summary.textContent = t('loadChatsFailedShort');
@@ -1137,9 +1487,69 @@ function installTopCloseButton() {
     syncTopCloseButton();
 }
 
+/**
+ * Migrates our localStorage keys when characters or chats are renamed outside
+ * this extension, so pins and favorites survive. Listens only, never emits.
+ */
+function subscribeToNativeEvents() {
+    const context = globalThis.SillyTavern?.getContext?.();
+    const eventSource = context?.eventSource;
+    const eventTypes = context?.eventTypes;
+    if (typeof eventSource?.on !== 'function' || !eventTypes) return;
+
+    if (eventTypes.CHARACTER_RENAMED) {
+        eventSource.on(eventTypes.CHARACTER_RENAMED, (oldAvatar, newAvatar) => {
+            if (!oldAvatar || !newAvatar || oldAvatar === newAvatar) return;
+            if (pinnedCharacters.delete(oldAvatar)) {
+                pinnedCharacters.add(newAvatar);
+                saveStringSet(PINNED_CHARACTERS_KEY, pinnedCharacters);
+            }
+            if (archivedCharacters.delete(oldAvatar)) {
+                archivedCharacters.add(newAvatar);
+                saveStringSet(ARCHIVED_CHARACTERS_KEY, archivedCharacters);
+            }
+            const oldPrefix = `${oldAvatar}::`;
+            let favoritesChanged = false;
+            for (const key of [...favoriteChats]) {
+                if (key.startsWith(oldPrefix)) {
+                    favoriteChats.delete(key);
+                    favoriteChats.add(`${newAvatar}::${key.slice(oldPrefix.length)}`);
+                    favoritesChanged = true;
+                }
+            }
+            if (favoritesChanged) saveStringSet(FAVORITE_CHATS_KEY, favoriteChats);
+            let archivedChanged = false;
+            for (const key of [...archivedChats]) {
+                if (key.startsWith(oldPrefix)) {
+                    archivedChats.delete(key);
+                    archivedChats.add(`${newAvatar}::${key.slice(oldPrefix.length)}`);
+                    archivedChanged = true;
+                }
+            }
+            if (archivedChanged) saveStringSet(ARCHIVED_CHATS_KEY, archivedChats);
+        });
+    }
+
+    if (eventTypes.CHAT_RENAMED) {
+        eventSource.on(eventTypes.CHAT_RENAMED, ({ avatarId, groupId, oldFileName, newFileName }) => {
+            if (groupId || !avatarId || !oldFileName || !newFileName) return;
+            const oldKey = getChatKey(avatarId, oldFileName);
+            if (favoriteChats.delete(oldKey)) {
+                favoriteChats.add(getChatKey(avatarId, newFileName));
+                saveStringSet(FAVORITE_CHATS_KEY, favoriteChats);
+            }
+            if (archivedChats.delete(oldKey)) {
+                archivedChats.add(getChatKey(avatarId, newFileName));
+                saveStringSet(ARCHIVED_CHATS_KEY, archivedChats);
+            }
+        });
+    }
+}
+
 function initialize() {
     scanWelcomePanels();
     installTopCloseButton();
+    subscribeToNativeEvents();
 
     let activeLanguage = getLanguage();
     const updateLanguage = () => {
@@ -1161,7 +1571,12 @@ function initialize() {
         attributes: true,
         attributeFilter: ['lang'],
     });
-    setInterval(updateLanguage, 1000);
+    // Also re-syncs the top-bar close button: opening a character without any
+    // chat history produces no #chat mutations for the observer to catch.
+    setInterval(() => {
+        updateLanguage();
+        syncTopCloseButton();
+    }, 1000);
 
     const observer = new MutationObserver(mutations => {
         for (const mutation of mutations) {

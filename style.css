@@ -143,12 +143,6 @@
     opacity: 1;
 }
 
-.character-chat-pills-search {
-    width: 100%;
-    min-height: 38px;
-    margin: 0 0 3px;
-}
-
 .character-chat-pills-list {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(94px, 1fr));
@@ -297,6 +291,33 @@
     transform: rotate(-18deg);
 }
 
+.character-chat-pill-archive {
+    position: absolute;
+    top: 38px;
+    right: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: rgba(10, 10, 14, 0.72);
+    color: #fff;
+    cursor: pointer;
+    opacity: 0.46;
+    transition: opacity 120ms ease, color 120ms ease;
+}
+
+.character-chat-pill:hover .character-chat-pill-archive,
+.character-chat-pill-archive:focus-visible,
+.character-chat-pill-archive.is-archived {
+    opacity: 1;
+}
+
+.character-chat-pill-archive.is-archived {
+    color: var(--SmartThemeQuoteColor, #c7a9ff);
+}
+
 .character-chat-pill-date {
     min-height: 1.2em;
     color: var(--SmartThemeBodyColor, #dedede);
@@ -382,12 +403,31 @@
     align-items: center;
     gap: 7px;
     padding: 9px 13px;
+    border: 1px solid var(--SmartThemeBorderColor);
     border: 1px solid color-mix(in srgb, var(--ccp-accent) 45%, transparent);
     border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
     background: color-mix(in srgb, var(--ccp-accent) 16%, transparent);
     color: inherit;
     font: inherit;
     cursor: pointer;
+}
+
+.character-chat-detail-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 8px;
+}
+
+.character-chat-detail-import,
+.character-chat-detail-archive {
+    opacity: 0.62;
+}
+
+.character-chat-detail-import:hover,
+.character-chat-detail-archive:hover {
+    opacity: 1;
 }
 
 .character-chat-detail-list {
@@ -434,6 +474,10 @@
 
 .character-chat-modal-overlay {
     position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
     inset: 0;
     z-index: 99999;
     display: flex;
@@ -441,6 +485,7 @@
     justify-content: center;
     padding: 18px;
     background: rgba(0, 0, 0, 0.62);
+    -webkit-backdrop-filter: blur(8px);
     backdrop-filter: blur(8px);
     animation: character-chat-fade-in 160ms ease-out;
 }
@@ -593,8 +638,10 @@
     align-items: center;
     gap: 4px;
     padding: 2px 7px;
+    border: 1px solid var(--SmartThemeBorderColor);
     border: 1px solid color-mix(in srgb, var(--SmartThemeQuoteColor) 55%, transparent);
     border-radius: 999px;
+    background: rgba(0, 0, 0, 0.3);
     background: color-mix(in srgb, var(--SmartThemeQuoteColor) 18%, rgba(0, 0, 0, 0.3));
     color: var(--SmartThemeBodyColor, #f2f2f2);
     font-size: 0.65rem;
@@ -630,10 +677,6 @@
 .character-chat-modal-row-stats {
     opacity: 0.42;
     font-size: 0.72em;
-}
-
-.character-chat-modal-row-arrow {
-    opacity: 0.38;
 }
 
 .character-chat-modal-row-actions {
@@ -694,6 +737,17 @@
     opacity: 1;
 }
 
+/* Prevent the grey tap flash on touch devices (Android Chrome). */
+.character-chat-pill,
+.character-chat-pill-pin,
+.character-chat-modal-row,
+.character-chat-icon-button,
+.character-chat-row-action,
+.character-chat-segment,
+.character-chat-mobile-density button {
+    -webkit-tap-highlight-color: transparent;
+}
+
 @keyframes character-chat-fade-in {
     from { opacity: 0; }
 }
@@ -736,17 +790,31 @@
     }
 
     .character-chat-pills-list[data-mobile-columns="2"],
-    .character-chat-pills-list[data-density="shelf"][data-mobile-columns="2"] {
+    .character-chat-pills-list[data-density="shelf"][data-mobile-columns="2"],
+    .character-chat-pills-list[data-density="compact"][data-mobile-columns="2"] {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
+    .character-chat-pills-list[data-mobile-columns="3"],
+    .character-chat-pills-list[data-density="shelf"][data-mobile-columns="3"],
+    .character-chat-pills-list[data-density="compact"][data-mobile-columns="3"] {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
     .character-chat-pills-list[data-mobile-columns="4"],
-    .character-chat-pills-list[data-density="shelf"][data-mobile-columns="4"] {
+    .character-chat-pills-list[data-density="shelf"][data-mobile-columns="4"],
+    .character-chat-pills-list[data-density="compact"][data-mobile-columns="4"] {
         grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 6px;
     }
 
     .character-chat-pill-pin {
+        width: 30px;
+        height: 30px;
+        opacity: 0.8;
+    }
+
+    .character-chat-pill-archive {
         width: 30px;
         height: 30px;
         opacity: 0.8;
@@ -761,14 +829,27 @@
     }
 
     .character-chat-modal-overlay {
-        align-items: flex-end;
+        display: block;
+        box-sizing: border-box;
+        height: 100vh;
+        height: 100dvh;
+        margin: 0;
         padding: 0;
     }
 
     .character-chat-modal {
-        width: 100%;
-        max-height: 86dvh;
-        border-radius: 24px 24px 0 0;
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        box-sizing: border-box;
+        width: calc(100% - 24px);
+        max-width: 620px;
+        max-height: calc(100% - 24px);
+        margin: 0;
+        border-radius: 24px;
+        -webkit-transform: translate(-50%, -50%);
+        transform: translate(-50%, -50%);
+        animation: none;
     }
 
     .character-chat-modal-new span {
@@ -793,6 +874,12 @@
         height: 36px;
         justify-content: center;
         padding: 0;
+    }
+
+    .character-chat-detail-import,
+    .character-chat-detail-archive {
+        width: 36px;
+        height: 36px;
     }
 
     .character-chat-detail-new span {
@@ -933,12 +1020,35 @@
     }
 }
 
+/* Ultra-wide monitors (2K/4K): cap the content width so chat rows and pills
+   don't stretch into unreadably long lines. No effect below 2000px. */
+@media screen and (min-width: 2000px) {
+    .character-chat-pills-container {
+        max-width: 1600px;
+        margin-inline: auto;
+    }
+}
+
+/* Bigger touch targets where the actions row is a free flex layout
+   (landscape tablets and large touch screens). Fixed grids already have
+   their own sizes and are intentionally left alone. */
+@media (hover: none) and (min-width: 1025px),
+       (pointer: coarse) and (min-width: 1025px),
+       (hover: none) and (min-width: 601px) and (max-width: 1024px) and (orientation: landscape),
+       (pointer: coarse) and (min-width: 601px) and (max-width: 1024px) and (orientation: landscape) {
+    .character-chat-row-action {
+        width: 38px;
+        height: 38px;
+    }
+}
+
 @media (hover: none), (pointer: coarse) {
     .character-chat-pill:hover {
         transform: none;
     }
 
     .character-chat-pill-pin,
+    .character-chat-pill-archive,
     .character-chat-row-action {
         opacity: 0.85;
     }
@@ -947,6 +1057,7 @@
 @media (prefers-reduced-motion: reduce) {
     .character-chat-pill,
     .character-chat-pill-pin,
+    .character-chat-pill-archive,
     .character-chat-modal-overlay,
     .character-chat-modal {
         animation: none !important;
